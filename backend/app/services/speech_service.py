@@ -6,51 +6,73 @@ from app.core.languages import get_language_config
 
 logger = logging.getLogger(__name__)
 
+# Connection-pooled HTTP client
+http_client = httpx.AsyncClient(timeout=15.0)
+
 class MultilingualSpeechService:
     """
     Multilingual STT (Speech-to-Text) & TTS (Text-to-Speech) service layer.
-    Uses API keys (Krutrim / Sarvam / Groq / OpenAI) without downloading large models.
-    Supports browser-native speech fallbacks.
+    Powered by Groq Whisper Large v3 for ultra-low latency Indic STT.
     """
 
     async def transcribe_audio_api(self, audio_bytes: bytes, filename: str, lang_code: str = "en") -> Dict[str, Any]:
         """
-        Transcribes audio using Groq / Krutrim / OpenAI Speech API if keys are present.
+        Transcribes audio using Groq Whisper Large v3 (sub-200ms latency).
         """
         lang_cfg = get_language_config(lang_code)
         
-        # 1. Try Groq Whisper API if key present
+        # 1. Groq Whisper Large v3 (Primary STT Engine)
         if settings.GROQ_API_KEY:
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
-                    files = {"file": (filename, audio_bytes, "audio/wav")}
-                    data = {"model": "whisper-large-v3", "language": lang_cfg.code}
-                    response = await client.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data)
-                    if response.status_code == 200:
-                        result = response.json()
-                        return {"success": True, "text": result.get("text", "").strip(), "provider": "groq_whisper"}
+                headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
+                files = {"file": (filename, audio_bytes, "audio/wav")}
+                data = {
+                    "model": settings.GROQ_WHISPER_MODEL,
+                    "language": "mr" if lang_cfg.code == "mr" else "en",
+                    "temperature": "0.0",
+                    "response_format": "json"
+                }
+                response = await http_client.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers=headers,
+                    files=files,
+                    data=data
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    return {
+                        "success": True,
+                        "text": result.get("text", "").strip(),
+                        "provider": "groq_whisper_large_v3",
+                        "language": lang_cfg.code
+                    }
+                else:
+                    logger.warning(f"Groq STT returned status {response.status_code}: {response.text}")
             except Exception as e:
-                logger.warning(f"Groq STT failed: {e}")
+                logger.warning(f"Groq Whisper STT call failed: {e}")
 
-        # 2. Try Sarvam / Krutrim Indic STT API if configured
+        # 2. Sarvam Indic STT fallback if present
         if settings.SARVAM_API_KEY and lang_code == "mr":
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    headers = {"api-subscription-key": settings.SARVAM_API_KEY}
-                    files = {"file": (filename, audio_bytes, "audio/wav")}
-                    data = {"language_code": "mr-IN", "model": "saarika:v1"}
-                    response = await client.post("https://api.sarvam.ai/speech-to-text", headers=headers, files=files, data=data)
-                    if response.status_code == 200:
-                        result = response.json()
-                        return {"success": True, "text": result.get("transcript", "").strip(), "provider": "sarvam_saarika"}
+                headers = {"api-subscription-key": settings.SARVAM_API_KEY}
+                files = {"file": (filename, audio_bytes, "audio/wav")}
+                data = {"language_code": "mr-IN", "model": "saarika:v1"}
+                response = await http_client.post("https://api.sarvam.ai/speech-to-text", headers=headers, files=files, data=data)
+                if response.status_code == 200:
+                    result = response.json()
+                    return {
+                        "success": True,
+                        "text": result.get("transcript", "").strip(),
+                        "provider": "sarvam_saarika",
+                        "language": "mr"
+                    }
             except Exception as e:
                 logger.warning(f"Sarvam STT failed: {e}")
 
         return {
             "success": False,
             "text": "",
-            "message": "Cloud STT API key not configured; using client-side Web Speech API",
+            "message": "Cloud STT API key not configured; using browser Web Speech API",
             "provider": "browser_fallback"
         }
 
@@ -60,37 +82,36 @@ class MultilingualSpeechService:
         """
         lang_cfg = get_language_config(lang_code)
 
-        # 1. Sarvam AI Bulbul TTS for Marathi/Hindi if key available
+        # 1. Sarvam Bulbul Indic TTS (if key configured)
         if settings.SARVAM_API_KEY and lang_code in ["mr", "hi"]:
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    headers = {
-                        "api-subscription-key": settings.SARVAM_API_KEY,
-                        "Content-Type": "application/json"
-                    }
-                    payload = {
-                        "inputs": [text],
-                        "target_language_code": f"{lang_code}-IN",
-                        "speaker": "meera",
-                        "model": "bulbul:v1"
-                    }
-                    response = await client.post("https://api.sarvam.ai/text-to-speech", headers=headers, json=payload)
-                    if response.status_code == 200:
-                        data = response.json()
-                        audios = data.get("audios", [])
-                        if audios:
-                            return {
-                                "success": True,
-                                "audio_base64": audios[0],
-                                "audio_format": "wav",
-                                "provider": "sarvam_bulbul",
-                                "text": text,
-                                "language": lang_cfg.code
-                            }
+                headers = {
+                    "api-subscription-key": settings.SARVAM_API_KEY,
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "inputs": [text],
+                    "target_language_code": f"{lang_code}-IN",
+                    "speaker": "meera",
+                    "model": "bulbul:v1"
+                }
+                response = await http_client.post("https://api.sarvam.ai/text-to-speech", headers=headers, json=payload)
+                if response.status_code == 200:
+                    data = response.json()
+                    audios = data.get("audios", [])
+                    if audios:
+                        return {
+                            "success": True,
+                            "audio_base64": audios[0],
+                            "audio_format": "wav",
+                            "provider": "sarvam_bulbul",
+                            "text": text,
+                            "language": lang_cfg.code
+                        }
             except Exception as e:
                 logger.warning(f"Sarvam TTS failed: {e}")
 
-        # Browser Speech Synthesis payload
+        # Browser Native SpeechSynthesis payload
         return {
             "success": True,
             "audio_base64": None,

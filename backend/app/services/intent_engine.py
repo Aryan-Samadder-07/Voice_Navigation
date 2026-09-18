@@ -13,10 +13,13 @@ logger = logging.getLogger(__name__)
 
 INTENTS_FILE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "training_intents.json")
 
+# Persistent async HTTP client with connection pooling for sub-second latency
+http_client = httpx.AsyncClient(timeout=10.0)
+
 class NavigationIntentEngine:
     """
-    Trainable Multilingual Intent Classification & Voice Navigation Engine.
-    Supports English, Marathi, and extensible local Indic languages.
+    Optimized Multilingual Intent Classification & Voice Navigation Engine.
+    Powered by SiliconFlow Qwen 2.5 7B with Groq fallback and local fuzzy cache.
     """
 
     def __init__(self):
@@ -86,7 +89,7 @@ class NavigationIntentEngine:
 
     def _fuzzy_match(self, text: str, lang_code: str) -> Optional[Dict[str, Any]]:
         """
-        Calculates fuzzy match scores across keywords and trained utterances.
+        Calculates fast fuzzy match scores across keywords and trained utterances.
         """
         query = text.strip().lower()
         best_match = None
@@ -115,71 +118,95 @@ class NavigationIntentEngine:
             # 3. Check keywords
             for kw in route.get(keyword_key, []):
                 if kw.lower() in query:
-                    kw_score = 0.88 + (len(kw) / max(len(query), 1)) * 0.1
+                    kw_score = 0.90 + (len(kw) / max(len(query), 1)) * 0.1
                     if kw_score > highest_score:
-                        highest_score = min(kw_score, 0.98)
+                        highest_score = min(kw_score, 0.99)
                         best_match = route
 
-        if best_match and highest_score >= 0.60:
-            return {"route": best_match, "score": highest_score, "match_type": "fuzzy_trained"}
+        if best_match and highest_score >= 0.85:
+            return {"route": best_match, "score": highest_score, "match_type": "fast_cache"}
 
         return None
 
-    async def _classify_with_llm(self, query: str, lang_code: str) -> Optional[Dict[str, Any]]:
+    async def _classify_with_qwen_or_groq(self, query: str, lang_code: str) -> Optional[Dict[str, Any]]:
         """
-        Uses cloud LLM API (Groq / Krutrim / OpenAI) if keys are provided to classify intent.
+        Uses SiliconFlow Qwen 2.5 7B (or Groq Llama 3.3) for natural language reasoning & intent extraction.
         """
         routes_summary = [
-            {"id": r["route_id"], "path": r["path"], "name": r.get(f"name_{lang_code}", r["name_en"])}
+            {"id": r["route_id"], "path": r["path"], "name": r.get(f"name_{lang_code}", r["name_en"]), "keywords": r.get(f"keywords_{lang_code}", [])}
             for r in self.routes_data
         ]
 
-        prompt = f"""You are an AI navigation assistant for a web application.
-Language of user input: {lang_code} (English or Marathi).
-User Command: "{query}"
+        system_prompt = f"""You are a low-latency Multilingual Navigation & Assistance AI.
+Language: {lang_code} (English or Marathi / मराठी).
+Task: Given a user voice command, determine whether the user wants to navigate to one of the application routes or is asking an informational/help question.
 
-Available routes:
+Available Routes:
 {json.dumps(routes_summary, ensure_ascii=False)}
 
-Identify if the user wants to navigate to one of the above routes or is asking a general question.
-Respond ONLY with JSON format:
-{{
-  "intent": "NAVIGATE" | "QUESTION" | "UNKNOWN",
-  "target_route_id": "<route_id>" or null,
-  "explanation": "brief reason",
-  "reply_text": "polite response in the same language ({lang_code})"
-}}
+Rules:
+1. If the user wants to navigate, return intent="NAVIGATE" and target_route_id=<route_id>.
+2. If asking for help/question/problem, return intent="QUESTION" with a concise reply in the same language.
+3. Respond ONLY with valid JSON with these keys:
+{{"intent": "NAVIGATE" | "QUESTION" | "UNKNOWN", "target_route_id": "<id or null>", "reply_text": "<concise spoken reply in {lang_code}>", "confidence": <float between 0.0 and 1.0>}}
 """
-        # If Groq API key is present
+
+        # 1. Try SiliconFlow Qwen 2.5 7B if key is available
+        if settings.SILICONFLOW_API_KEY:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {settings.SILICONFLOW_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": settings.SILICONFLOW_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": query}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 150,
+                    "response_format": {"type": "json_object"}
+                }
+                resp = await http_client.post("https://api.siliconflow.cn/v1/chat/completions", headers=headers, json=payload)
+                if resp.status_code == 200:
+                    raw_content = resp.json()["choices"][0]["message"]["content"]
+                    return json.loads(raw_content)
+            except Exception as e:
+                logger.warning(f"SiliconFlow Qwen 2.5 API error: {e}")
+
+        # 2. Try Groq LLM API if key is available
         if settings.GROQ_API_KEY:
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
-                        json={
-                            "model": "llama-3.3-70b-versatile",
-                            "messages": [{"role": "user", "content": prompt}],
-                            "temperature": 0.1,
-                            "response_format": {"type": "json_object"}
-                        }
-                    )
-                    if resp.status_code == 200:
-                        content = resp.json()["choices"][0]["message"]["content"]
-                        return json.loads(content)
+                headers = {
+                    "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": settings.GROQ_LLM_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": query}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 150,
+                    "response_format": {"type": "json_object"}
+                }
+                resp = await http_client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+                if resp.status_code == 200:
+                    raw_content = resp.json()["choices"][0]["message"]["content"]
+                    return json.loads(raw_content)
             except Exception as e:
-                logger.warning(f"Groq LLM intent classification failed: {e}")
+                logger.warning(f"Groq LLM API error: {e}")
 
         return None
 
     async def process_voice_command(self, query: str, lang_code: str = "en") -> Dict[str, Any]:
         """
-        Main pipeline:
-        1. Checks for empty input
-        2. Detects if it's a Problem Solving / FAQ question
-        3. Runs Trainable Fuzzy/Keyword Matcher
-        4. Fallbacks to Cloud LLM API if available
-        5. Formats multilingual response & TTS payload
+        Optimized Low-Latency Processing Pipeline:
+        1. Fast cache check
+        2. Qwen 2.5 / Groq LLM Intent & Reasoning extraction
+        3. Local Fuzzy Fallback
         """
         clean_query = query.strip()
         lang_cfg = get_language_config(lang_code)
@@ -195,15 +222,10 @@ Respond ONLY with JSON format:
                 "confidence": 0.0
             }
 
-        # Step 1: Check if this is a problem solving / informational query
-        if problem_solver.is_problem_query(clean_query, lang_cfg.code):
-            return await problem_solver.solve_or_explain(clean_query, lang_cfg.code)
-
-        # Step 2: Trainable Fuzzy / Utterance Match
-        fuzzy_res = self._fuzzy_match(clean_query, lang_cfg.code)
-        if fuzzy_res:
-            route = fuzzy_res["route"]
-            score = fuzzy_res["score"]
+        # Step 1: Check fast exact/trained cache for instant sub-millisecond response
+        fast_res = self._fuzzy_match(clean_query, lang_cfg.code)
+        if fast_res and fast_res["score"] >= 0.92:
+            route = fast_res["route"]
             page_name = route.get(f"name_{lang_cfg.code}", route["name_en"])
             ack_template = random.choice(lang_cfg.nav_ack_templates)
             response_text = ack_template.format(page_name=page_name)
@@ -216,32 +238,71 @@ Respond ONLY with JSON format:
                 "route_id": route["route_id"],
                 "target_path": route["path"],
                 "target_name": page_name,
-                "confidence": round(score, 3),
-                "match_type": fuzzy_res["match_type"],
+                "confidence": round(fast_res["score"], 3),
+                "match_type": fast_res["match_type"],
+                "engine": "fast_cache",
                 "response_text": response_text
             }
 
-        # Step 3: Cloud LLM fallback if configured
-        llm_res = await self._classify_with_llm(clean_query, lang_cfg.code)
-        if llm_res and llm_res.get("intent") == "NAVIGATE" and llm_res.get("target_route_id"):
-            route_id = llm_res["target_route_id"]
-            matched_route = next((r for r in self.routes_data if r["route_id"] == route_id), None)
-            if matched_route:
-                page_name = matched_route.get(f"name_{lang_cfg.code}", matched_route["name_en"])
+        # Step 2: SiliconFlow Qwen 2.5 7B / Groq LLM Classification
+        llm_res = await self._classify_with_qwen_or_groq(clean_query, lang_cfg.code)
+        if llm_res:
+            llm_intent = llm_res.get("intent", "").upper()
+            target_route_id = llm_res.get("target_route_id")
+            
+            if llm_intent == "NAVIGATE" and target_route_id:
+                matched_route = next((r for r in self.routes_data if r["route_id"] == target_route_id), None)
+                if matched_route:
+                    page_name = matched_route.get(f"name_{lang_cfg.code}", matched_route["name_en"])
+                    return {
+                        "intent": "NAVIGATE",
+                        "action": "NAVIGATE",
+                        "transcript": clean_query,
+                        "language": lang_cfg.code,
+                        "route_id": matched_route["route_id"],
+                        "target_path": matched_route["path"],
+                        "target_name": page_name,
+                        "confidence": float(llm_res.get("confidence", 0.95)),
+                        "match_type": "qwen2.5_llm",
+                        "engine": "SiliconFlow_Qwen2.5-7B" if settings.SILICONFLOW_API_KEY else "Groq_Llama3.3",
+                        "response_text": llm_res.get("reply_text") or f"Navigating to {page_name}."
+                    }
+            
+            elif llm_intent == "QUESTION":
                 return {
-                    "intent": "NAVIGATE",
-                    "action": "NAVIGATE",
+                    "intent": "PROBLEM_SOLVING",
+                    "action": "NONE",
                     "transcript": clean_query,
                     "language": lang_cfg.code,
-                    "route_id": matched_route["route_id"],
-                    "target_path": matched_route["path"],
-                    "target_name": page_name,
-                    "confidence": 0.85,
-                    "match_type": "cloud_llm",
-                    "response_text": llm_res.get("reply_text") or f"Navigating to {page_name}."
+                    "status": "answered_by_qwen",
+                    "engine": "SiliconFlow_Qwen2.5-7B",
+                    "confidence": float(llm_res.get("confidence", 0.95)),
+                    "response_text": llm_res.get("reply_text", "")
                 }
 
-        # Step 4: Unknown / No matching route
+        # Step 3: Check Problem Solver heuristic if LLM key wasn't active
+        if problem_solver.is_problem_query(clean_query, lang_cfg.code):
+            return await problem_solver.solve_or_explain(clean_query, lang_cfg.code)
+
+        # Step 4: Fuzzy Fallback (lower threshold 0.60)
+        if fast_res and fast_res["score"] >= 0.60:
+            route = fast_res["route"]
+            page_name = route.get(f"name_{lang_cfg.code}", route["name_en"])
+            ack_template = random.choice(lang_cfg.nav_ack_templates)
+            return {
+                "intent": "NAVIGATE",
+                "action": "NAVIGATE",
+                "transcript": clean_query,
+                "language": lang_cfg.code,
+                "route_id": route["route_id"],
+                "target_path": route["path"],
+                "target_name": page_name,
+                "confidence": round(fast_res["score"], 3),
+                "match_type": "fuzzy_fallback",
+                "response_text": ack_template.format(page_name=page_name)
+            }
+
+        # Step 5: Unknown
         return {
             "intent": "UNKNOWN",
             "action": "NONE",

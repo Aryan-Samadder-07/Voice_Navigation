@@ -9,25 +9,30 @@ class Settings(BaseModel):
     API_PREFIX: str = "/api"
     DEBUG: bool = os.getenv("DEBUG", "True").lower() in ("true", "1")
     
-    # Cloud AI / Indic API configurations (Optional API Keys)
-    KRUTRIM_API_KEY: str = os.getenv("KRUTRIM_API_KEY", "")
+    # Cloud AI API Keys
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    SILICONFLOW_API_KEY: str = os.getenv("SILICONFLOW_API_KEY", "")
     SARVAM_API_KEY: str = os.getenv("SARVAM_API_KEY", "")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    KRUTRIM_API_KEY: str = os.getenv("KRUTRIM_API_KEY", "")
     
-    # LLM Provider selection: "krutrim" | "groq" | "openai" | "rule_based"
-    DEFAULT_LLM_PROVIDER: str = os.getenv("DEFAULT_LLM_PROVIDER", "rule_based")
+    # Model Configurations
+    SILICONFLOW_MODEL: str = os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+    GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+    GROQ_WHISPER_MODEL: str = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3")
     
-    # TTS & STT Provider: "browser" | "sarvam" | "krutrim" | "openai"
+    # Default Provider selection: "siliconflow" | "groq" | "rule_based"
+    DEFAULT_LLM_PROVIDER: str = os.getenv("DEFAULT_LLM_PROVIDER", "siliconflow")
+    
+    # TTS & STT Provider: "browser" | "groq" | "sarvam"
     DEFAULT_TTS_PROVIDER: str = os.getenv("DEFAULT_TTS_PROVIDER", "browser")
-    DEFAULT_STT_PROVIDER: str = os.getenv("DEFAULT_STT_PROVIDER", "browser")
+    DEFAULT_STT_PROVIDER: str = os.getenv("DEFAULT_STT_PROVIDER", "groq")
     
-    # Frontend Origin CORS
+    # CORS
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001"
+        "*"
     ]
 
 settings = Settings()
