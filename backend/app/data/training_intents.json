@@ -5,21 +5,8 @@
     "name_en": "Dashboard",
     "name_mr": "डॅशबोर्ड",
     "description": "Main overview, statistics, and quick system status",
-    "keywords_en": [
-      "home",
-      "dashboard",
-      "main",
-      "start",
-      "overview",
-      "index"
-    ],
-    "keywords_mr": [
-      "मुख्य",
-      "डॅशबोर्ड",
-      "सुरुवात",
-      "पहिले पान",
-      "होम"
-    ],
+    "keywords_en": ["home", "dashboard", "main", "start", "overview", "index"],
+    "keywords_mr": ["मुख्य", "डॅशबोर्ड", "सुरुवात", "पहिले पान", "होम"],
     "utterances_en": [
       "go to home",
       "go to dashboard",
@@ -134,13 +121,7 @@
       "options",
       "setup"
     ],
-    "keywords_mr": [
-      "सेटिंग्ज",
-      "पर्याय",
-      "मांडणी",
-      "कॉन्फिगरेशन",
-      "बदल"
-    ],
+    "keywords_mr": ["सेटिंग्ज", "पर्याय", "मांडणी", "कॉन्फिगरेशन", "बदल"],
     "utterances_en": [
       "go to settings",
       "open settings",

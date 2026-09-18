@@ -6,8 +6,14 @@ from app.core.languages import list_supported_languages, get_language_config
 from app.services.intent_engine import intent_engine
 from app.services.speech_service import speech_service
 from app.services.problem_solver import problem_solver
+from app.services.rate_limiter import rate_tracker
 
 router = APIRouter(prefix="/assistant", tags=["AI Assistant"])
+
+@router.get("/stats")
+async def get_assistant_stats():
+    """Returns real-time rate limit counters and latency telemetry."""
+    return {"telemetry": rate_tracker.get_telemetry()}
 
 class ProcessVoiceRequest(BaseModel):
     text: str = Field(..., description="Recognized speech text or typed command")

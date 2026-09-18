@@ -1,4 +1,5 @@
 import logging
+import httpx
 from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.core.languages import get_language_config
@@ -7,33 +8,21 @@ logger = logging.getLogger(__name__)
 
 class ProblemSolverService:
     """
-    Modular service for answering user questions and solving problems.
-    Currently held under development as requested, but fully architected
-    to hook into future ML pipelines (Qwen2.5, MobileNet3, XGBoost, etc.) or Cloud LLMs.
+    Grounded AI Problem Solving & Q&A Service.
+    Accurately guides users on existing features and explicitly identifies unbuilt/unsupported features.
     """
-    
-    def __init__(self):
-        self.status = "under_development"
-        self.version = "v0.1.0-alpha"
 
     def is_problem_query(self, query: str, lang: str = "en") -> bool:
         """
-        Heuristic to detect if a query is an informational/problem-solving question
-        rather than a direct navigation command.
+        Detects if user input is an informational/problem-solving question.
         """
         q = query.strip().lower()
         
-        # English question indicators
-        en_indicators = ["what is", "how do i", "how to", "why", "who", "where can i", "explain", "fix", "error", "problem", "tell me about", "can you help me with"]
-        # Marathi question indicators
-        mr_indicators = ["काय", "कसे", "का", "कधी", "कुठे", "सांगा", "माहिती द्या", "मदत करा", "समस्या", "अडचण", "कसा करायचा"]
+        en_indicators = ["what is", "how do i", "how to", "why", "who", "where can i", "explain", "fix", "error", "problem", "tell me about", "can you help me with", "what does", "can i", "is there", "change my", "update my", "delete", "export", "download"]
+        mr_indicators = ["काय", "कसे", "का", "कधी", "कुठे", "सांगा", "माहिती द्या", "मदत करा", "समस्या", "अडचण", "कसा करायचा", "कशी करावी", "बदलू शकतो का", "कसा बदलू"]
         
-        if any(w in q for w in en_indicators):
+        if any(w in q for w in en_indicators) or any(w in q for w in mr_indicators):
             return True
-        if any(w in q for w in mr_indicators):
-            return True
-            
-        # Ends with question mark
         if q.endswith("?") or q.endswith("？"):
             return True
             
@@ -41,38 +30,81 @@ class ProblemSolverService:
 
     async def solve_or_explain(self, query: str, lang_code: str = "en", context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Processes a user question or problem.
-        Returns a structured response indicating current development status
-        and bilingual user-friendly response.
+        Processes user questions using grounded AI reasoning.
         """
         lang_cfg = get_language_config(lang_code)
-        
-        if lang_code == "mr":
-            response_text = (
-                f"तुमचा प्रश्न: \"{query}\". "
-                "समस्या निवारण आणि प्रश्नोत्तर मॉडेल सध्या विकसित केले जात आहे (Under Development). "
-                "लवकरच हे पूर्णपणे कार्यक्षम होईल. सध्या तुम्ही आवाज आदेशांद्वारे पृष्ठांवर नेव्हिगेट करू शकता."
-            )
-        else:
-            response_text = (
-                f"Regarding your query: \"{query}\". "
-                "The automated problem-solving and diagnostic engine is currently under development. "
-                "Full ML/QA capabilities will be integrated soon. Meanwhile, you can use voice commands to navigate across pages."
-            )
 
+        system_prompt = f"""You are the Voice AI Assistant for VoiceNav AI.
+Language: {lang_code} (English or Marathi / मराठी).
+
+CRITICAL KNOWLEDGE BASE & GROUNDING:
+1. Existing Available Features in this web application:
+   - Dashboard (/): View system overview and quick voice command recommendations.
+   - Analytics (/analytics): View real-time accuracy charts, latency stats, and usage distribution.
+   - Profile (/profile): View user name (Aryan Samadder), role, and recent voice activities.
+   - Settings (/settings): Configure primary STT/TTS engine, match threshold, and API status.
+   - Diagnostics (/diagnostics): Live rate limit monitors, RPM counter, and model latency health.
+   - Help (/help): Multilingual voice commands cheatsheet and reference guide.
+2. Unimplemented / Future Features:
+   - Editing profile info, changing phone numbers/passwords, exporting CSV data, payment gateway, dark mode toggle, and external ML vision pipelines are CURRENTLY UNDER DEVELOPMENT / NOT YET IMPLEMENTED.
+3. Guidelines:
+   - If the user asks about an unimplemented feature (e.g. changing phone number, editing profile, exporting data), politely and clearly state that this feature is currently not supported or under development, and recommend what they can do instead.
+   - Plain conversational text ONLY. DO NOT use markdown symbols, NO asterisks (**), NO arrows (>), NO bullet hashes (#). Speakable text only.
+   - Maximum 2 sentences.
+"""
+
+        # Call live Groq AI
+        if settings.GROQ_API_KEY:
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": settings.GROQ_LLM_MODEL,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": query}
+                            ],
+                            "temperature": 0.1,
+                            "max_tokens": 140
+                        }
+                    )
+                    if resp.status_code == 200:
+                        content = resp.json()["choices"][0]["message"]["content"].strip()
+                        # Clean any stray markdown
+                        clean_content = content.replace("**", "").replace("*", "").replace(">", "").replace("#", "").strip()
+                        return {
+                            "intent": "PROBLEM_SOLVING",
+                            "action": "NONE",
+                            "query": query,
+                            "language": lang_cfg.code,
+                            "response_text": clean_content,
+                            "target_path": "/help",
+                            "confidence": 0.98,
+                            "engine": "live_groq_ai"
+                        }
+            except Exception as e:
+                logger.error(f"Live AI Problem Solver Error: {e}")
+
+        # Grounded fallback
+        fallback_msg = (
+            f"Regarding {query}: That feature is currently not available or under development. You can explore Dashboard, Analytics, Profile, Settings, and Diagnostics."
+            if lang_code != "mr" else
+            f"तुमच्या {query} या प्रश्नासाठी: हे वैशिष्ट्य सध्या विकसित केले जात आहे. तुम्ही डॅशबोर्ड, ॲनालिटिक्स, प्रोफाईल आणि सेटिंग्ज पाहू शकता."
+        )
         return {
             "intent": "PROBLEM_SOLVING",
-            "status": "under_development",
+            "action": "NONE",
             "query": query,
             "language": lang_cfg.code,
-            "response_text": response_text,
-            "target_path": "/help", # Redirect or suggest visiting help page
-            "confidence": 0.95,
-            "hook_metadata": {
-                "engine": "problem_solver_stub",
-                "ready_for_integration": True,
-                "supported_ml_models": ["Qwen2.5-8B", "MobileNet3", "XGBoost", "PaddleOCR"]
-            }
+            "response_text": fallback_msg,
+            "target_path": "/help",
+            "confidence": 0.90,
+            "engine": "grounded_guidance"
         }
 
 problem_solver = ProblemSolverService()

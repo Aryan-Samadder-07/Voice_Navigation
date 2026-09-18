@@ -129,46 +129,89 @@ export class SpeechClient {
     return await res.json();
   }
 
-  public speak(text: string, lang: SupportedLang, audioBase64?: string | null) {
-    if (typeof window === "undefined") return;
+  private isSpeaking: boolean = false;
+  private onSpeakingChangeCallback?: (isSpeaking: boolean) => void;
 
-    // 1. If backend provided base64 audio (e.g. Sarvam Bulbul / Cloud TTS)
+  public setSpeakingCallback(callback: (isSpeaking: boolean) => void) {
+    this.onSpeakingChangeCallback = callback;
+  }
+
+  public getIsSpeaking(): boolean {
+    return this.isSpeaking;
+  }
+
+  /**
+   * Cleans text to ensure natural, smooth TTS without stuttering on markdown/symbols.
+   */
+  private cleanTextForSpeech(raw: string): string {
+    return raw
+      .replace(/[*_#>`~[\]()]/g, " ") // Remove markdown symbols
+      .replace(/\s+/g, " ")            // Collapse multiple spaces
+      .trim();
+  }
+
+  public speak(text: string, lang: SupportedLang, audioBase64?: string | null) {
+    if (typeof window === "undefined" || !text) return;
+
+    // Stop listening immediately when assistant speaks to prevent mic feedback loop
+    this.stopListening();
+
+    const notifySpeaking = (speaking: boolean) => {
+      this.isSpeaking = speaking;
+      this.onSpeakingChangeCallback?.(speaking);
+    };
+
+    // 1. If backend provided base64 audio (e.g. Cloud TTS)
     if (audioBase64) {
       try {
         const audio = new Audio(`data:audio/wav;base64,${audioBase64}`);
-        audio.play().catch(e => console.warn("Audio element play error:", e));
+        notifySpeaking(true);
+        audio.onended = () => notifySpeaking(false);
+        audio.onerror = () => notifySpeaking(false);
+        audio.play().catch(e => {
+          console.warn("Audio element play error:", e);
+          notifySpeaking(false);
+        });
         return;
       } catch (err) {
         console.warn("Audio playback error:", err);
+        notifySpeaking(false);
       }
     }
 
-    // 2. Web Speech API SpeechSynthesis
+    // 2. Web Speech API SpeechSynthesis (Optimized for smooth, natural voice)
     if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel(); // Stop any active speech
+      window.speechSynthesis.cancel(); // Stop any pending speech
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
+      const cleanText = this.cleanTextForSpeech(text);
+      if (!cleanText) return;
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = 0.95; // Natural relaxed pace
       utterance.pitch = 1.0;
+      utterance.lang = lang === "mr" ? "mr-IN" : "en-IN";
 
-      if (lang === "mr") {
-        utterance.lang = "mr-IN";
-      } else {
-        utterance.lang = "en-IN";
-      }
+      utterance.onstart = () => notifySpeaking(true);
+      utterance.onend = () => notifySpeaking(false);
+      utterance.onerror = () => notifySpeaking(false);
 
-      // Find best matching voice
+      // Select highest quality natural voice
       const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        const targetLocale = lang === "mr" ? "mr" : "en";
-        const matchedVoice = voices.find(
-          v => v.lang.toLowerCase().includes(targetLocale) || (lang === "mr" && (v.name.includes("Marathi") || v.name.includes("मराठी")))
-        );
-        if (matchedVoice) {
-          utterance.voice = matchedVoice;
+      if (voices && voices.length > 0) {
+        if (lang === "mr") {
+          const marathiVoice = voices.find(
+            v => v.lang.startsWith("mr") || v.name.toLowerCase().includes("marathi") || v.name.includes("मराठी")
+          ) || voices.find(v => v.lang.startsWith("hi"));
+          if (marathiVoice) utterance.voice = marathiVoice;
+        } else {
+          const naturalEnglish = voices.find(
+            v => (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Heera") || v.name.includes("Ravi")) && v.lang.startsWith("en")
+          ) || voices.find(v => v.lang.startsWith("en"));
+          if (naturalEnglish) utterance.voice = naturalEnglish;
         }
       }
 
+      notifySpeaking(true);
       window.speechSynthesis.speak(utterance);
     }
   }

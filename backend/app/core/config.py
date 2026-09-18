@@ -18,7 +18,7 @@ class Settings(BaseModel):
     
     # Model Configurations
     SILICONFLOW_MODEL: str = os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-    GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+    GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "qwen/qwen3.8-27b")
     GROQ_WHISPER_MODEL: str = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3")
     
     # Default Provider selection: "siliconflow" | "groq" | "rule_based"

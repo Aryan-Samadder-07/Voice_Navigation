@@ -19,8 +19,22 @@ export interface RouteMetadata {
   utterances_mr: string[];
 }
 
+export interface TelemetryData {
+  rpm_used: number;
+  rpm_limit: number;
+  rpm_available: number;
+  daily_used: number;
+  daily_limit: number;
+  daily_available: number;
+  total_lifetime_requests: number;
+  last_latency_ms: number;
+  avg_latency_ms: number;
+  rate_limit_status: "NORMAL" | "WARNING" | "EXCEEDED" | "RATE_LIMITED";
+  window_reset_seconds: number;
+}
+
 export interface ProcessResult {
-  intent: "NAVIGATE" | "PROBLEM_SOLVING" | "UNKNOWN";
+  intent: "NAVIGATE" | "PROBLEM_SOLVING" | "UNKNOWN" | "RATE_LIMITED";
   action: "NAVIGATE" | "NONE";
   transcript: string;
   language: string;
@@ -29,13 +43,11 @@ export interface ProcessResult {
   target_name?: string;
   confidence?: number;
   match_type?: string;
+  model?: string;
+  latency_ms?: number;
   response_text: string;
   status?: string;
-  hook_metadata?: {
-    engine: string;
-    ready_for_integration: boolean;
-    supported_ml_models: string[];
-  };
+  telemetry?: TelemetryData;
 }
 
 export interface ApiResponse {

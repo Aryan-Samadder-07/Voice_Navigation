@@ -12,6 +12,7 @@ export const VoiceAssistant: React.FC = () => {
 
   const [language, setLanguage] = useState<SupportedLang>("en");
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [transcript, setTranscript] = useState<string>("");
   const [lastResult, setLastResult] = useState<ProcessResult | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -20,12 +21,16 @@ export const VoiceAssistant: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [audioFeedback, setAudioFeedback] = useState<boolean>(true);
 
-  // Set language in speech client
+  // Set language in speech client & wire speaking callback
   useEffect(() => {
     speechClient.setLanguage(language);
+    speechClient.setSpeakingCallback((speaking) => {
+      setIsSpeaking(speaking);
+    });
   }, [language]);
 
   const handleToggleListening = () => {
+    if (isSpeaking || isProcessing) return; // Prevent activation while AI is talking or processing
     setErrorMessage(null);
     if (isListening) {
       speechClient.stopListening();
@@ -141,11 +146,11 @@ export const VoiceAssistant: React.FC = () => {
                 width: "8px",
                 height: "8px",
                 borderRadius: "50%",
-                background: isListening ? "#ef4444" : isProcessing ? "#eab308" : "#22c55e",
-                boxShadow: isListening ? "0 0 8px #ef4444" : "none"
+                background: isSpeaking ? "#a855f7" : isListening ? "#ef4444" : isProcessing ? "#eab308" : "#22c55e",
+                boxShadow: isSpeaking ? "0 0 8px #a855f7" : isListening ? "0 0 8px #ef4444" : "none"
               }} />
               <span style={{ fontSize: "0.85rem", fontWeight: "700", letterSpacing: "0.5px" }}>
-                AI VOICE ASSISTANT
+                {isSpeaking ? "AI SPEAKING..." : isProcessing ? "PROCESSING..." : "AI VOICE ASSISTANT"}
               </span>
             </div>
 
@@ -153,6 +158,7 @@ export const VoiceAssistant: React.FC = () => {
             <div style={{ display: "flex", background: "rgba(255, 255, 255, 0.08)", borderRadius: "8px", padding: "2px" }}>
               <button
                 type="button"
+                disabled={isSpeaking || isProcessing}
                 onClick={() => setLanguage("en")}
                 style={{
                   background: language === "en" ? "#3b82f6" : "transparent",
@@ -162,13 +168,15 @@ export const VoiceAssistant: React.FC = () => {
                   borderRadius: "6px",
                   fontSize: "0.78rem",
                   fontWeight: "600",
-                  cursor: "pointer"
+                  cursor: (isSpeaking || isProcessing) ? "not-allowed" : "pointer",
+                  opacity: (isSpeaking || isProcessing) ? 0.6 : 1
                 }}
               >
                 EN (English)
               </button>
               <button
                 type="button"
+                disabled={isSpeaking || isProcessing}
                 onClick={() => setLanguage("mr")}
                 style={{
                   background: language === "mr" ? "#3b82f6" : "transparent",
@@ -178,7 +186,8 @@ export const VoiceAssistant: React.FC = () => {
                   borderRadius: "6px",
                   fontSize: "0.78rem",
                   fontWeight: "600",
-                  cursor: "pointer"
+                  cursor: (isSpeaking || isProcessing) ? "not-allowed" : "pointer",
+                  opacity: (isSpeaking || isProcessing) ? 0.6 : 1
                 }}
               >
                 MR (मराठी)
@@ -191,8 +200,9 @@ export const VoiceAssistant: React.FC = () => {
             <button
               type="button"
               onClick={handleToggleListening}
+              disabled={isSpeaking || isProcessing}
               style={{
-                background: isListening ? "#dc2626" : "#2563eb",
+                background: isSpeaking ? "#6b21a8" : isListening ? "#dc2626" : isProcessing ? "#ca8a04" : "#2563eb",
                 color: "#ffffff",
                 border: "none",
                 borderRadius: "50px",
@@ -202,12 +212,14 @@ export const VoiceAssistant: React.FC = () => {
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                cursor: "pointer",
-                boxShadow: isListening ? "0 0 15px rgba(220, 38, 38, 0.6)" : "0 4px 12px rgba(37, 99, 235, 0.4)",
+                cursor: (isSpeaking || isProcessing) ? "not-allowed" : "pointer",
+                opacity: (isSpeaking || isProcessing) ? 0.75 : 1,
+                boxShadow: isSpeaking ? "0 0 15px rgba(168, 85, 247, 0.5)" : isListening ? "0 0 15px rgba(220, 38, 38, 0.6)" : "0 4px 12px rgba(37, 99, 235, 0.4)",
                 transition: "all 0.2s ease"
               }}
+              title={isSpeaking ? "Assistant is currently speaking..." : isProcessing ? "Processing command..." : "Click to speak"}
             >
-              <span>{isListening ? "🛑 Stop" : "🎙️ Speak"}</span>
+              <span>{isSpeaking ? "🗣️ Speaking..." : isListening ? "🛑 Stop" : isProcessing ? "⏳ Thinking..." : "🎙️ Speak"}</span>
               {isListening && <span style={{ fontSize: "0.75rem", opacity: 0.9 }}>Listening...</span>}
             </button>
 
@@ -215,6 +227,7 @@ export const VoiceAssistant: React.FC = () => {
             <form onSubmit={handleManualSubmit} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <input
                 type="text"
+                disabled={isSpeaking || isProcessing}
                 value={manualText}
                 onChange={(e) => setManualText(e.target.value)}
                 placeholder={language === "mr" ? "किंवा येथे मराठीत टाइप करा..." : "or type a command (e.g. 'go to settings')..."}
@@ -225,12 +238,14 @@ export const VoiceAssistant: React.FC = () => {
                   borderRadius: "6px",
                   padding: "6px 12px",
                   fontSize: "0.82rem",
-                  width: "220px"
+                  width: "220px",
+                  cursor: (isSpeaking || isProcessing) ? "not-allowed" : "text",
+                  opacity: (isSpeaking || isProcessing) ? 0.6 : 1
                 }}
               />
               <button
                 type="submit"
-                disabled={!manualText.trim() || isProcessing}
+                disabled={!manualText.trim() || isProcessing || isSpeaking}
                 style={{
                   background: "rgba(255, 255, 255, 0.15)",
                   border: "none",
@@ -238,8 +253,9 @@ export const VoiceAssistant: React.FC = () => {
                   borderRadius: "6px",
                   padding: "6px 12px",
                   fontSize: "0.82rem",
-                  cursor: "pointer",
-                  fontWeight: "600"
+                  cursor: (!manualText.trim() || isProcessing || isSpeaking) ? "not-allowed" : "pointer",
+                  fontWeight: "600",
+                  opacity: (!manualText.trim() || isProcessing || isSpeaking) ? 0.6 : 1
                 }}
               >
                 Send
@@ -316,44 +332,76 @@ export const VoiceAssistant: React.FC = () => {
             )}
           </div>
 
-          {/* Action Badge */}
+          {/* Action, Latency & Rate Limit Badges */}
           {lastResult && (
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              {lastResult.intent === "NAVIGATE" && (
-                <span style={{
-                  background: "#15803d",
-                  color: "#dcfce7",
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  fontWeight: "700",
-                  fontSize: "0.75rem",
-                  letterSpacing: "0.3px"
-                }}>
-                  ➔ NAVIGATED: {lastResult.target_path}
-                </span>
-              )}
-              {lastResult.intent === "PROBLEM_SOLVING" && (
-                <span style={{
-                  background: "#854d0e",
-                  color: "#fef08a",
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  fontWeight: "700",
-                  fontSize: "0.75rem"
-                }}>
-                  ⚙️ QA / ML: Under Development
-                </span>
-              )}
-              {lastResult.confidence !== undefined && (
-                <span style={{
-                  background: "rgba(255, 255, 255, 0.1)",
-                  color: "#cbd5e1",
-                  padding: "4px 6px",
-                  borderRadius: "4px",
-                  fontSize: "0.7rem"
-                }}>
-                  Conf: {Math.round((lastResult.confidence || 0) * 100)}%
-                </span>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                {lastResult.intent === "NAVIGATE" && (
+                  <span style={{
+                    background: "#15803d",
+                    color: "#dcfce7",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    fontWeight: "700",
+                    fontSize: "0.75rem",
+                    letterSpacing: "0.3px"
+                  }}>
+                    ➔ NAVIGATED: {lastResult.target_path}
+                  </span>
+                )}
+                {lastResult.intent === "PROBLEM_SOLVING" && (
+                  <span style={{
+                    background: "#1e3a8a",
+                    color: "#bfdbfe",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    fontWeight: "700",
+                    fontSize: "0.75rem"
+                  }}>
+                    💡 AI Problem Solver
+                  </span>
+                )}
+                {lastResult.latency_ms !== undefined && (
+                  <span style={{
+                    background: "rgba(56, 189, 248, 0.15)",
+                    color: "#38bdf8",
+                    padding: "4px 6px",
+                    borderRadius: "4px",
+                    fontSize: "0.72rem",
+                    fontWeight: "600",
+                    border: "1px solid rgba(56, 189, 248, 0.3)"
+                  }}>
+                    ⚡ {lastResult.latency_ms} ms
+                  </span>
+                )}
+                {lastResult.confidence !== undefined && (
+                  <span style={{
+                    background: "rgba(255, 255, 255, 0.1)",
+                    color: "#cbd5e1",
+                    padding: "4px 6px",
+                    borderRadius: "4px",
+                    fontSize: "0.7rem"
+                  }}>
+                    Conf: {Math.round((lastResult.confidence || 0) * 100)}%
+                  </span>
+                )}
+              </div>
+
+              {/* Rate Limit & Quota Telemetry */}
+              {lastResult.telemetry && (
+                <div style={{ fontSize: "0.68rem", color: "#94a3b8", display: "flex", gap: "8px" }}>
+                  <span>
+                    RPM: <strong style={{ color: lastResult.telemetry.rpm_used >= 16 ? "#f87171" : "#4ade80" }}>{lastResult.telemetry.rpm_used}/{lastResult.telemetry.rpm_limit}</strong>
+                  </span>
+                  <span>|</span>
+                  <span>
+                    Daily: <strong style={{ color: "#e2e8f0" }}>{lastResult.telemetry.daily_used}/{lastResult.telemetry.daily_limit}</strong>
+                  </span>
+                  <span>|</span>
+                  <span style={{ color: lastResult.telemetry.rate_limit_status === "NORMAL" ? "#4ade80" : "#facc15" }}>
+                    ● {lastResult.telemetry.rate_limit_status}
+                  </span>
+                </div>
               )}
             </div>
           )}

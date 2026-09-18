@@ -2,24 +2,23 @@ import json
 import os
 import random
 import logging
+import time
 import httpx
 from typing import Dict, Any, List, Optional
 from rapidfuzz import fuzz
 from app.core.config import settings
 from app.core.languages import get_language_config, SUPPORTED_LANGUAGES
 from app.services.problem_solver import problem_solver
+from app.services.rate_limiter import rate_tracker
 
 logger = logging.getLogger(__name__)
 
 INTENTS_FILE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "training_intents.json")
 
-# Persistent async HTTP client with connection pooling for sub-second latency
-http_client = httpx.AsyncClient(timeout=10.0)
-
 class NavigationIntentEngine:
     """
-    Optimized Multilingual Intent Classification & Voice Navigation Engine.
-    Powered by SiliconFlow Qwen 2.5 7B with Groq fallback and local fuzzy cache.
+    Real-world Multilingual Intent & Navigation Engine.
+    Handles noisy STT acoustic misrecognitions, phonetic transliterations, and live Groq AI reasoning.
     """
 
     def __init__(self):
@@ -27,35 +26,34 @@ class NavigationIntentEngine:
         self.load_training_data()
 
     def load_training_data(self) -> None:
-        """Loads or reloads the trainable routes and utterances dataset."""
+        """Loads the registered routes catalog."""
         try:
             if os.path.exists(INTENTS_FILE_PATH):
                 with open(INTENTS_FILE_PATH, "r", encoding="utf-8") as f:
                     self.routes_data = json.load(f)
-                logger.info(f"Loaded {len(self.routes_data)} routes with multilingual training intents.")
             else:
                 self.routes_data = []
         except Exception as e:
-            logger.error(f"Failed to load training intents: {e}")
+            logger.error(f"Failed to load routes catalog: {e}")
             self.routes_data = []
 
     def save_training_data(self) -> bool:
-        """Persists training routes and utterances to JSON file."""
+        """Persists trained phrases to JSON catalog."""
         try:
             with open(INTENTS_FILE_PATH, "w", encoding="utf-8") as f:
                 json.dump(self.routes_data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            logger.error(f"Failed to persist training intents: {e}")
+            logger.error(f"Failed to persist training catalog: {e}")
             return False
 
     def get_all_routes(self) -> List[Dict[str, Any]]:
-        """Returns the full list of trained routes and metadata."""
+        """Returns all registered application routes."""
         return self.routes_data
 
     def train_utterance(self, route_id: str, utterance: str, lang_code: str = "en") -> Dict[str, Any]:
         """
-        Trains the AI assistant with a new custom voice phrase for a route in real time.
+        Dynamically registers custom voice command in real time.
         """
         lang = "mr" if "mr" in lang_code.lower() else "en"
         target_field = f"utterances_{lang}"
@@ -83,101 +81,89 @@ class NavigationIntentEngine:
         
         return {
             "success": True,
-            "message": f"Utterance '{cleaned}' already exists for route '{route_id}'.",
+            "message": f"Utterance '{cleaned}' already registered for route '{route_id}'.",
             "route_id": route_id
         }
 
-    def _fuzzy_match(self, text: str, lang_code: str) -> Optional[Dict[str, Any]]:
+    def find_fuzzy_phonetic_match(self, query: str, lang_code: str = "en") -> Optional[Dict[str, Any]]:
         """
-        Calculates fast fuzzy match scores across keywords and trained utterances.
+        Phonetic & fuzzy acoustic matcher that recovers words misheard due to microphone noise or accent.
+        E.g. "there's wood" -> Dashboard, "analytix" / "analysis" -> Analytics, "pro file" -> Profile.
         """
-        query = text.strip().lower()
+        q = query.lower().strip()
         best_match = None
-        highest_score = 0.0
-
-        lang_key = "mr" if "mr" in lang_code.lower() else "en"
-        utterance_key = f"utterances_{lang_key}"
-        keyword_key = f"keywords_{lang_key}"
+        best_score = 0.0
 
         for route in self.routes_data:
-            # 1. Exact or partial check on path or ID
-            if query == route["path"] or query == route["route_id"]:
-                return {"route": route, "score": 1.0, "match_type": "exact_id"}
+            route_id = route["route_id"]
+            keywords = route.get("keywords_en", []) + route.get("keywords_mr", [])
+            utterances = route.get("utterances_en", []) + route.get("utterances_mr", [])
+            all_candidates = keywords + utterances + [route.get("name_en", "").lower(), route.get("name_mr", "").lower()]
 
-            # 2. Check trained utterances
-            for ut in route.get(utterance_key, []):
-                score_ratio = fuzz.ratio(query, ut.lower()) / 100.0
-                score_partial = fuzz.partial_ratio(query, ut.lower()) / 100.0
-                score_token = fuzz.token_set_ratio(query, ut.lower()) / 100.0
-                max_ut_score = max(score_ratio, score_partial * 0.95, score_token)
+            for cand in all_candidates:
+                cand_lower = cand.lower()
+                # 1. Exact or substring match
+                if q == cand_lower or cand_lower in q:
+                    return {"route": route, "score": 98.0, "matched_candidate": cand}
 
-                if max_ut_score > highest_score:
-                    highest_score = max_ut_score
-                    best_match = route
+                # 2. Token Sort / Token Set Ratio
+                score_sort = fuzz.token_sort_ratio(q, cand_lower)
+                score_set = fuzz.token_set_ratio(q, cand_lower)
+                score_partial = fuzz.partial_ratio(q, cand_lower)
+                max_cand_score = max(score_sort, score_set, score_partial)
 
-            # 3. Check keywords
-            for kw in route.get(keyword_key, []):
-                if kw.lower() in query:
-                    kw_score = 0.90 + (len(kw) / max(len(query), 1)) * 0.1
-                    if kw_score > highest_score:
-                        highest_score = min(kw_score, 0.99)
-                        best_match = route
+                if max_cand_score > best_score:
+                    best_score = max_cand_score
+                    best_match = {"route": route, "score": max_cand_score, "matched_candidate": cand}
 
-        if best_match and highest_score >= 0.85:
-            return {"route": best_match, "score": highest_score, "match_type": "fast_cache"}
+        if best_match and best_score >= 70.0:
+            return best_match
 
         return None
 
-    async def _classify_with_qwen_or_groq(self, query: str, lang_code: str) -> Optional[Dict[str, Any]]:
+    async def _classify_with_groq_ai(self, query: str, lang_code: str) -> Optional[Dict[str, Any]]:
         """
-        Uses SiliconFlow Qwen 2.5 7B (or Groq Llama 3.3) for natural language reasoning & intent extraction.
+        Pure AI intent extraction through live Groq inference with robust phonetic noise handling.
         """
         routes_summary = [
-            {"id": r["route_id"], "path": r["path"], "name": r.get(f"name_{lang_code}", r["name_en"]), "keywords": r.get(f"keywords_{lang_code}", [])}
+            {
+                "id": r["route_id"],
+                "path": r["path"],
+                "name": r.get(f"name_{lang_code}", r["name_en"]),
+                "description": r.get("description", ""),
+                "keywords": r.get(f"keywords_{lang_code}", []) + r.get("keywords_en", [])
+            }
             for r in self.routes_data
         ]
 
-        system_prompt = f"""You are a low-latency Multilingual Navigation & Assistance AI.
-Language: {lang_code} (English or Marathi / मराठी).
-Task: Given a user voice command, determine whether the user wants to navigate to one of the application routes or is asking an informational/help question.
+        system_prompt = f"""You are an intelligent Multilingual Voice Navigation AI Assistant for a web application.
+Language of user input: {lang_code} (English or Marathi / मराठी).
 
-Available Routes:
+Application Routes Catalog:
 {json.dumps(routes_summary, ensure_ascii=False)}
 
-Rules:
-1. If the user wants to navigate, return intent="NAVIGATE" and target_route_id=<route_id>.
-2. If asking for help/question/problem, return intent="QUESTION" with a concise reply in the same language.
-3. Respond ONLY with valid JSON with these keys:
-{{"intent": "NAVIGATE" | "QUESTION" | "UNKNOWN", "target_route_id": "<id or null>", "reply_text": "<concise spoken reply in {lang_code}>", "confidence": <float between 0.0 and 1.0>}}
+CRITICAL ACOUSTIC & PHONETIC ERROR TOLERANCE:
+Speech-to-Text (STT) models often mishear words due to microphone noise, room acoustics, or accents. You MUST match sound-alikes and misrecognitions to the intended route:
+- "there's wood", "there is wood", "dash wood", "dash board", "deshboard", "tash board", "dish board", "home", "main", "start", "डॅशबोर्ड", "मुख्य पान" -> Route: home (/)
+- "analysis", "analyst", "analytix", "allistics", "metrics", "charts", "stats", "reports", "एनालिसिस", "ॲनालिसिस", "आकडेवारी" -> Route: analytics (/analytics)
+- "pro file", "pro-file", "pro fill", "brofile", "profile", "account", "details", "प्रोफाइल", "माझे खाते", "माझी माहिती" -> Route: profile (/profile)
+- "set tings", "satting", "sitting", "set ins", "options", "config", "सेटिंग्ज", "मांडणी", "पर्याय" -> Route: settings (/settings)
+- "diagnose", "diagnostic", "die agnostics", "day agnostic", "dog nostics", "health", "system check", "निदान", "चाचणी" -> Route: diagnostics (/diagnostics)
+- "halp", "health support", "helpp", "support", "faq", "guide", "मदत", "मार्गदर्शक" -> Route: help (/help)
+
+Instructions:
+1. If the user intends to navigate (even if phonetically mispronounced or noisy), set intent="NAVIGATE" and target_route_id=<id>.
+2. If asking an informational question/problem, set intent="QUESTION".
+3. Provide a polite spoken reply_text in the exact language ({lang_code}). Plain speakable text only.
+4. Output ONLY valid JSON:
+{{"intent": "NAVIGATE" | "QUESTION" | "UNKNOWN", "target_route_id": "<id or null>", "reply_text": "<spoken reply>", "confidence": 0.98}}
 """
 
-        # 1. Try SiliconFlow Qwen 2.5 7B if key is available
-        if settings.SILICONFLOW_API_KEY:
-            try:
-                headers = {
-                    "Authorization": f"Bearer {settings.SILICONFLOW_API_KEY}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "model": settings.SILICONFLOW_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": query}
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 150,
-                    "response_format": {"type": "json_object"}
-                }
-                resp = await http_client.post("https://api.siliconflow.cn/v1/chat/completions", headers=headers, json=payload)
-                if resp.status_code == 200:
-                    raw_content = resp.json()["choices"][0]["message"]["content"]
-                    return json.loads(raw_content)
-            except Exception as e:
-                logger.warning(f"SiliconFlow Qwen 2.5 API error: {e}")
+        if not settings.GROQ_API_KEY:
+            return None
 
-        # 2. Try Groq LLM API if key is available
-        if settings.GROQ_API_KEY:
-            try:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 headers = {
                     "Authorization": f"Bearer {settings.GROQ_API_KEY}",
                     "Content-Type": "application/json"
@@ -186,30 +172,45 @@ Rules:
                     "model": settings.GROQ_LLM_MODEL,
                     "messages": [
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": query}
+                        {"role": "user", "content": f"User speech/text command: {query}"}
                     ],
                     "temperature": 0.1,
                     "max_tokens": 150,
                     "response_format": {"type": "json_object"}
                 }
-                resp = await http_client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+                resp = await client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
                 if resp.status_code == 200:
                     raw_content = resp.json()["choices"][0]["message"]["content"]
                     return json.loads(raw_content)
-            except Exception as e:
-                logger.warning(f"Groq LLM API error: {e}")
+                elif resp.status_code == 429:
+                    logger.warning("Groq AI Rate limit reached")
+                    return {"rate_limited": True}
+        except Exception as e:
+            logger.error(f"Live Groq AI API error: {e}")
 
         return None
 
     async def process_voice_command(self, query: str, lang_code: str = "en") -> Dict[str, Any]:
         """
-        Optimized Low-Latency Processing Pipeline:
-        1. Fast cache check
-        2. Qwen 2.5 / Groq LLM Intent & Reasoning extraction
-        3. Local Fuzzy Fallback
+        Processes voice command with live latency timing, rate limit checks, AI reasoning, and phonetic fault recovery.
         """
+        start_time = time.perf_counter()
         clean_query = query.strip()
         lang_cfg = get_language_config(lang_code)
+
+        # 1. Check Rate Limits
+        limit_check = rate_tracker.check_rate_limit()
+        if limit_check.get("is_limited"):
+            return {
+                "intent": "RATE_LIMITED",
+                "action": "NONE",
+                "transcript": clean_query,
+                "language": lang_cfg.code,
+                "response_text": "Rate limit threshold reached. Please wait a few seconds before giving another voice command." if lang_code != "mr" else "कमाल विनंती मर्यादा गाठली आहे. कृपया काही सेकंद थांबा.",
+                "target_path": None,
+                "confidence": 0.0,
+                "telemetry": rate_tracker.get_telemetry()
+            }
 
         if not clean_query:
             return {
@@ -219,38 +220,29 @@ Rules:
                 "language": lang_cfg.code,
                 "response_text": lang_cfg.default_unknown_msg,
                 "target_path": None,
-                "confidence": 0.0
+                "confidence": 0.0,
+                "telemetry": rate_tracker.get_telemetry()
             }
 
-        # Step 1: Check fast exact/trained cache for instant sub-millisecond response
-        fast_res = self._fuzzy_match(clean_query, lang_cfg.code)
-        if fast_res and fast_res["score"] >= 0.92:
-            route = fast_res["route"]
-            page_name = route.get(f"name_{lang_cfg.code}", route["name_en"])
-            ack_template = random.choice(lang_cfg.nav_ack_templates)
-            response_text = ack_template.format(page_name=page_name)
+        # 2. Check if Question / Problem-solving query
+        if problem_solver.is_problem_query(clean_query, lang_cfg.code):
+            prob_res = await problem_solver.solve_or_explain(clean_query, lang_cfg.code)
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            rate_tracker.record_request(latency_ms)
+            prob_res["latency_ms"] = round(latency_ms, 2)
+            prob_res["telemetry"] = rate_tracker.get_telemetry()
+            return prob_res
 
-            return {
-                "intent": "NAVIGATE",
-                "action": "NAVIGATE",
-                "transcript": clean_query,
-                "language": lang_cfg.code,
-                "route_id": route["route_id"],
-                "target_path": route["path"],
-                "target_name": page_name,
-                "confidence": round(fast_res["score"], 3),
-                "match_type": fast_res["match_type"],
-                "engine": "fast_cache",
-                "response_text": response_text
-            }
+        # 3. Live AI Intent Processing via Groq
+        ai_res = await self._classify_with_groq_ai(clean_query, lang_cfg.code)
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        rate_tracker.record_request(latency_ms)
 
-        # Step 2: SiliconFlow Qwen 2.5 7B / Groq LLM Classification
-        llm_res = await self._classify_with_qwen_or_groq(clean_query, lang_cfg.code)
-        if llm_res:
-            llm_intent = llm_res.get("intent", "").upper()
-            target_route_id = llm_res.get("target_route_id")
+        if ai_res and not ai_res.get("rate_limited"):
+            ai_intent = ai_res.get("intent", "").upper()
+            target_route_id = ai_res.get("target_route_id")
             
-            if llm_intent == "NAVIGATE" and target_route_id:
+            if ai_intent == "NAVIGATE" and target_route_id:
                 matched_route = next((r for r in self.routes_data if r["route_id"] == target_route_id), None)
                 if matched_route:
                     page_name = matched_route.get(f"name_{lang_cfg.code}", matched_route["name_en"])
@@ -262,33 +254,33 @@ Rules:
                         "route_id": matched_route["route_id"],
                         "target_path": matched_route["path"],
                         "target_name": page_name,
-                        "confidence": float(llm_res.get("confidence", 0.95)),
-                        "match_type": "qwen2.5_llm",
-                        "engine": "SiliconFlow_Qwen2.5-7B" if settings.SILICONFLOW_API_KEY else "Groq_Llama3.3",
-                        "response_text": llm_res.get("reply_text") or f"Navigating to {page_name}."
+                        "confidence": float(ai_res.get("confidence", 0.98)),
+                        "match_type": "live_groq_ai",
+                        "model": settings.GROQ_LLM_MODEL,
+                        "latency_ms": round(latency_ms, 2),
+                        "response_text": ai_res.get("reply_text") or f"Navigating to {page_name}.",
+                        "telemetry": rate_tracker.get_telemetry()
                     }
             
-            elif llm_intent == "QUESTION":
+            elif ai_intent == "QUESTION":
                 return {
                     "intent": "PROBLEM_SOLVING",
                     "action": "NONE",
                     "transcript": clean_query,
                     "language": lang_cfg.code,
-                    "status": "answered_by_qwen",
-                    "engine": "SiliconFlow_Qwen2.5-7B",
-                    "confidence": float(llm_res.get("confidence", 0.95)),
-                    "response_text": llm_res.get("reply_text", "")
+                    "status": "answered_by_ai",
+                    "confidence": float(ai_res.get("confidence", 0.98)),
+                    "latency_ms": round(latency_ms, 2),
+                    "response_text": ai_res.get("reply_text", ""),
+                    "telemetry": rate_tracker.get_telemetry()
                 }
 
-        # Step 3: Check Problem Solver heuristic if LLM key wasn't active
-        if problem_solver.is_problem_query(clean_query, lang_cfg.code):
-            return await problem_solver.solve_or_explain(clean_query, lang_cfg.code)
-
-        # Step 4: Fuzzy Fallback (lower threshold 0.60)
-        if fast_res and fast_res["score"] >= 0.60:
-            route = fast_res["route"]
+        # 4. Phonetic & Acoustic Fuzzy Recovery (Catches noisy STT like "there's wood", "analysis", "pro file", etc.)
+        fuzzy_match = self.find_fuzzy_phonetic_match(clean_query, lang_cfg.code)
+        if fuzzy_match:
+            route = fuzzy_match["route"]
             page_name = route.get(f"name_{lang_cfg.code}", route["name_en"])
-            ack_template = random.choice(lang_cfg.nav_ack_templates)
+            reply = f"Navigating to {page_name}." if lang_cfg.code != "mr" else f"{page_name} पृष्ठावर नेत आहे."
             return {
                 "intent": "NAVIGATE",
                 "action": "NAVIGATE",
@@ -297,12 +289,15 @@ Rules:
                 "route_id": route["route_id"],
                 "target_path": route["path"],
                 "target_name": page_name,
-                "confidence": round(fast_res["score"], 3),
-                "match_type": "fuzzy_fallback",
-                "response_text": ack_template.format(page_name=page_name)
+                "confidence": round(fuzzy_match["score"] / 100.0, 2),
+                "match_type": "phonetic_fuzzy_recovery",
+                "model": "phonetic_noise_corrector",
+                "latency_ms": round(latency_ms, 2),
+                "response_text": reply,
+                "telemetry": rate_tracker.get_telemetry()
             }
 
-        # Step 5: Unknown
+        # 5. Unknown Query Result
         return {
             "intent": "UNKNOWN",
             "action": "NONE",
@@ -310,7 +305,10 @@ Rules:
             "language": lang_cfg.code,
             "target_path": None,
             "confidence": 0.0,
-            "response_text": lang_cfg.default_unknown_msg
+            "latency_ms": round(latency_ms, 2),
+            "response_text": lang_cfg.default_unknown_msg,
+            "telemetry": rate_tracker.get_telemetry()
         }
 
 intent_engine = NavigationIntentEngine()
+
