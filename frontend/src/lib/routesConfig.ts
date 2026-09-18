@@ -1,0 +1,146 @@
+import { RouteMetadata } from "./types";
+
+export const DEMO_ROUTES: RouteMetadata[] = [
+  {
+    route_id: "home",
+    path: "/",
+    name_en: "Dashboard",
+    name_mr: "डॅशबोर्ड",
+    description: "Main overview, statistics, and quick system status",
+    keywords_en: ["home", "dashboard", "main", "start", "overview", "index"],
+    keywords_mr: ["मुख्य", "डॅशबोर्ड", "सुरुवात", "पहिले पान", "होम"],
+    utterances_en: [
+      "go to home",
+      "go to dashboard",
+      "open home page",
+      "show main page",
+      "take me home",
+      "back to dashboard"
+    ],
+    utterances_mr: [
+      "मुख्य पृष्ठावर जा",
+      "डॅशबोर्ड दाखवा",
+      "डॅशबोर्ड उघडा",
+      "होम पेजवर जा",
+      "सुरुवातीचे पान दाखवा",
+      "मला डॅशबोर्डवर ने"
+    ]
+  },
+  {
+    route_id: "analytics",
+    path: "/analytics",
+    name_en: "Analytics",
+    name_mr: "ॲनालिटिक्स",
+    description: "Performance metrics, graphs, usage statistics, and trends",
+    keywords_en: ["analytics", "metrics", "graphs", "stats", "charts", "reports", "insights"],
+    keywords_mr: ["ॲनालिटिक्स", "आकडेवारी", "तक्ते", "आलेख", "माहिती", "रिपोर्ट"],
+    utterances_en: [
+      "go to analytics",
+      "open analytics",
+      "show metrics",
+      "view statistics",
+      "open reports",
+      "show graphs and charts"
+    ],
+    utterances_mr: [
+      "ॲनालिटिक्स पृष्ठावर जा",
+      "ॲनालिटिक्स दाखवा",
+      "आकडेवारी उघडा",
+      "आलेख दाखवा",
+      "माहिती आणि चार्ट्स उघडा"
+    ]
+  },
+  {
+    route_id: "profile",
+    path: "/profile",
+    name_en: "Profile",
+    name_mr: "माझे प्रोफाईल",
+    description: "User profile details, credentials, and activity",
+    keywords_en: ["profile", "account", "user", "me", "my account", "details"],
+    keywords_mr: ["प्रोफाईल", "माझे खाते", "खाते", "माझी माहिती", "वापरकर्ता"],
+    utterances_en: [
+      "open profile",
+      "go to my profile",
+      "show my account",
+      "view profile page",
+      "take me to user details"
+    ],
+    utterances_mr: [
+      "माझे प्रोफाईल दाखवा",
+      "प्रोफाईल पृष्ठावर जा",
+      "माझे खाते उघडा",
+      "खात्याची माहिती दाखवा",
+      "प्रोफाईल उघडा"
+    ]
+  },
+  {
+    route_id: "settings",
+    path: "/settings",
+    name_en: "Settings",
+    name_mr: "सेटिंग्ज",
+    description: "System preferences, audio configurations, API keys, and theme settings",
+    keywords_en: ["settings", "preferences", "config", "configuration", "options", "setup"],
+    keywords_mr: ["सेटिंग्ज", "पर्याय", "मांडणी", "कॉन्फिगरेशन", "बदल"],
+    utterances_en: [
+      "go to settings",
+      "open settings",
+      "show configurations",
+      "change preferences",
+      "open setup options"
+    ],
+    utterances_mr: [
+      "सेटिंग्ज उघडा",
+      "सेटिंग्ज पृष्ठावर जा",
+      "पर्याय दाखवा",
+      "कॉन्फिगरेशन उघडा",
+      "माझ्या सेटिंग्ज बदला"
+    ]
+  },
+  {
+    route_id: "diagnostics",
+    path: "/diagnostics",
+    name_en: "Diagnostics",
+    name_mr: "निदान आणि चाचणी",
+    description: "System health, API latency, ML model pipeline status, and audio checks",
+    keywords_en: ["diagnostics", "health", "system check", "status", "testing", "monitoring", "latency"],
+    keywords_mr: ["निदान", "सिस्टम तपासणी", "आरोग्य", "स्थिती", "चाचणी", "तपासा"],
+    utterances_en: [
+      "open diagnostics",
+      "go to system health",
+      "check diagnostics",
+      "show system test",
+      "view pipeline status"
+    ],
+    utterances_mr: [
+      "निदान पृष्ठ उघडा",
+      "सिस्टम स्थिती तपासा",
+      "आरोग्य चाचणी दाखवा",
+      "डायग्नोस्टिक्स वर जा",
+      "सिस्टम चाचणी उघडा"
+    ]
+  },
+  {
+    route_id: "help",
+    path: "/help",
+    name_en: "Help & Support",
+    name_mr: "मदत आणि सहाय्य",
+    description: "Help center, documentation, voice commands guide, and QA solver stub",
+    keywords_en: ["help", "support", "faq", "guide", "docs", "questions", "assist"],
+    keywords_mr: ["मदत", "सहाय्य", "मार्गदर्शक", "माहिती", "प्रश्नोत्तरे", "सूचना"],
+    utterances_en: [
+      "open help",
+      "go to help page",
+      "show support",
+      "view documentation",
+      "how to use this app",
+      "show voice commands guide"
+    ],
+    utterances_mr: [
+      "मदत केंद्र उघडा",
+      "मला मदत हवी आहे",
+      "सहाय्य पृष्ठावर जा",
+      "मार्गदर्शिका दाखवा",
+      "आवाज आदेशांची माहिती द्या"
+    ]
+  }
+];
