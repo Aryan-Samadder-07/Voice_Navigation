@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { RouteMetadata, SupportedLang } from "../lib/types";
+import { API_BASE_URL } from "../lib/speechClient";
 
 interface IntentTrainerProps {
   currentLang: SupportedLang;
@@ -18,7 +19,7 @@ export const IntentTrainer: React.FC<IntentTrainerProps> = ({ currentLang, onClo
 
   const fetchRoutes = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/assistant/routes");
+      const res = await fetch(`${API_BASE_URL}/assistant/routes`);
       if (res.ok) {
         const data = await res.json();
         setRoutes(data.routes || []);
@@ -40,7 +41,7 @@ export const IntentTrainer: React.FC<IntentTrainerProps> = ({ currentLang, onClo
     setStatusMsg(null);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/assistant/train", {
+      const res = await fetch(`${API_BASE_URL}/assistant/train`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
